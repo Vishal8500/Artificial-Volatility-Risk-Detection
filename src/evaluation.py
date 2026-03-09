@@ -1,90 +1,128 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import pandas as pd
-import numpy as np
-import joblib
-from sklearn.metrics import classification_report, confusion_matrix
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.model_selection import train_test_split
+from pytorch_tcn import TCN
 
-# =========================
-# DEVICE
-# =========================
+# ------------------------
+# Device
+# ------------------------
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 print("Using device:", device)
 
-# =========================
-# LOAD DATA
-# =========================
-df = pd.read_csv(r"D:\RISK Proj\data\synthetic_volatility_final_realistic.csv")
+# ------------------------
+# Load dataset
+# ------------------------
 
-y = df["label"].values
-X_flat = df.drop(columns=["label"]).values
+data = np.load("tcn_dataset.npz")
 
-WINDOW_SIZE = X_flat.shape[1] // 4
-SEQ_FEATURES = 4
+X = data["X"]
+y = data["y"]
 
-X = X_flat.reshape(-1, WINDOW_SIZE, SEQ_FEATURES)
+print("Dataset shape:", X.shape)
 
-# Same split as training
+# same split used in training
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
 )
 
-# =========================
-# LOAD SCALER
-# =========================
-scaler = joblib.load("tcn_scaler.pkl")
+X_test = torch.tensor(X_test, dtype=torch.float32)
+y_test = torch.tensor(y_test, dtype=torch.float32)
 
-X_test = scaler.transform(X_test.reshape(len(X_test), -1))
-X_test = X_test.reshape(-1, WINDOW_SIZE, SEQ_FEATURES)
+test_loader = DataLoader(
+    TensorDataset(X_test, y_test),
+    batch_size=64
+)
 
-X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
-y_test = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1).to(device)
+# ------------------------
+# Model definition
+# ------------------------
 
-# =========================
-# DEFINE MODEL (Same Architecture!)
-# =========================
-class TCN(nn.Module):
-    def __init__(self):
-        super(TCN, self).__init__()
-        
-        self.conv1 = nn.Conv1d(SEQ_FEATURES, 32, kernel_size=3)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3)
-        self.dropout = nn.Dropout(0.3)
-        
-        self.fc1 = nn.Linear(64 * (WINDOW_SIZE - 4), 32)
-        self.fc2 = nn.Linear(32, 1)
-        
-        self.relu = nn.ReLU()
-        
-    def forward(self, x):
-        x = x.permute(0, 2, 1)
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.dropout(x)
-        x = torch.flatten(x, start_dim=1)
-        x = self.relu(self.fc1(x))
-        return self.fc2(x)
+class TCNModel(nn.Module):
 
-# =========================
-# LOAD MODEL
-# =========================
-model = TCN().to(device)
-model.load_state_dict(torch.load("tcn_volatility_model.pth"))
+    def __init__(self, input_features):
+
+        super().__init__()
+
+        self.tcn = TCN(
+            num_inputs=input_features,
+            num_channels=[32,64,64],
+            kernel_size=3,
+            dropout=0.2
+        )
+
+        self.fc = nn.Linear(64,1)
+
+    def forward(self,x):
+
+        x = x.transpose(1,2)
+
+        y = self.tcn(x)
+
+        y = y[:,:,-1]
+
+        y = self.fc(y)
+
+        return torch.sigmoid(y)
+
+
+# ------------------------
+# Load trained model
+# ------------------------
+
+model = TCNModel(X.shape[2]).to(device)
+
+model.load_state_dict(torch.load("tcn_risk_model.pth"))
+
 model.eval()
 
-print("Model loaded successfully.")
+print("Model loaded successfully")
 
-# =========================
-# EVALUATION
-# =========================
+# ------------------------
+# Evaluation
+# ------------------------
+
+all_preds = []
+all_probs = []
+all_labels = []
+
 with torch.no_grad():
-    logits = model(X_test)
-    probs = torch.sigmoid(logits)
-    preds = (probs > 0.5).float()
 
-print("\nClassification Report:\n")
-print(classification_report(y_test.cpu(), preds.cpu()))
+    for X_batch, y_batch in test_loader:
 
-print("Confusion Matrix:\n")
-print(confusion_matrix(y_test.cpu(), preds.cpu()))
+        X_batch = X_batch.to(device)
+
+        outputs = model(X_batch).squeeze()
+
+        probs = outputs.cpu().numpy()
+
+        preds = (outputs > 0.5).float().cpu().numpy()
+
+        all_probs.extend(probs)
+        all_preds.extend(preds)
+        all_labels.extend(y_batch.numpy())
+
+
+all_preds = np.array(all_preds)
+all_labels = np.array(all_labels)
+
+# ------------------------
+# Metrics
+# ------------------------
+
+print("\nClassification Report\n")
+
+print(classification_report(all_labels, all_preds))
+
+print("\nConfusion Matrix\n")
+
+print(confusion_matrix(all_labels, all_preds))
+
+print("\nROC-AUC Score:", roc_auc_score(all_labels, all_probs))
