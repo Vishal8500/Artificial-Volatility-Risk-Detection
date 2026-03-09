@@ -1,149 +1,167 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import pandas as pd
-import numpy as np
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+from pytorch_tcn import TCN
 
-# =========================
-# DEVICE
-# =========================
+# -----------------------
+# Device
+# -----------------------
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 print("Using device:", device)
 
-# =========================
-# LOAD RAW SYNTHETIC DATA
-# =========================
-df = pd.read_csv("synthetic_volatility_final_realistic.csv")
+# -----------------------
+# Load dataset
+# -----------------------
 
-# Remove label
-y = df["label"].values
-X_flat = df.drop(columns=["label"]).values
+data = np.load("tcn_dataset.npz")
 
-# Automatically detect WINDOW_SIZE
-num_features = X_flat.shape[1]
-WINDOW_SIZE = num_features // 4
-SEQ_FEATURES = 4
+X = data["X"]
+y = data["y"]
 
-print("Detected WINDOW_SIZE:", WINDOW_SIZE)
+print("Dataset shape:", X.shape)
 
-# Reshape to (samples, window, features)
-X = X_flat.reshape(-1, WINDOW_SIZE, SEQ_FEATURES)
+# -----------------------
+# Train Test Split
+# -----------------------
 
-# Train-test split
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
 )
 
-# =========================
-# NORMALIZATION
-# =========================
-scaler = StandardScaler()
+# -----------------------
+# Torch tensors
+# -----------------------
 
-X_train = scaler.fit_transform(X_train.reshape(len(X_train), -1))
-X_test = scaler.transform(X_test.reshape(len(X_test), -1))
+X_train = torch.tensor(X_train, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
 
-X_train = X_train.reshape(-1, WINDOW_SIZE, SEQ_FEATURES)
-X_test = X_test.reshape(-1, WINDOW_SIZE, SEQ_FEATURES)
+X_test = torch.tensor(X_test, dtype=torch.float32)
+y_test = torch.tensor(y_test, dtype=torch.float32)
 
-# Convert to tensors
-X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
-X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
-y_train = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1).to(device)
-y_test = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1).to(device)
+train_loader = DataLoader(
+    TensorDataset(X_train, y_train),
+    batch_size=64,
+    shuffle=True,
+    pin_memory=True
+)
 
-# =========================
-# TCN MODEL (Sequence Only)
-# =========================
-class TCN(nn.Module):
-    def __init__(self):
-        super(TCN, self).__init__()
-        
-        self.conv1 = nn.Conv1d(SEQ_FEATURES, 32, kernel_size=3)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3)
-        self.dropout = nn.Dropout(0.3)
-        
-        self.fc1 = nn.Linear(64 * (WINDOW_SIZE - 4), 32)
-        self.fc2 = nn.Linear(32, 1)
-        
-        self.relu = nn.ReLU()
-        
-    def forward(self, x):
-        x = x.permute(0, 2, 1)  # (batch, features, window)
-        
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.dropout(x)
-        
-        x = torch.flatten(x, start_dim=1)
-        x = self.relu(self.fc1(x))
-        
-        return self.fc2(x)  # logits
+test_loader = DataLoader(
+    TensorDataset(X_test, y_test),
+    batch_size=64,
+    pin_memory=True
+)
 
-model = TCN().to(device)
+# -----------------------
+# TCN Model
+# -----------------------
 
-# =========================
-# LOSS (handle imbalance)
-# =========================
-class_counts = np.bincount(y)
-neg, pos = class_counts[0], class_counts[1]
+class TCNModel(nn.Module):
 
-pos_weight = torch.tensor([neg / pos]).to(device)
-criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    def __init__(self, input_features):
 
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+        super().__init__()
 
-# =========================
-# TRAINING
-# =========================
-EPOCHS = 15
-BATCH_SIZE = 64
+        self.tcn = TCN(
+            num_inputs=input_features,
+            num_channels=[32,64,64],
+            kernel_size=3,
+            dropout=0.2
+        )
+
+        self.fc = nn.Linear(64,1)
+
+    def forward(self,x):
+
+        x = x.transpose(1,2)
+
+        y = self.tcn(x)
+
+        y = y[:,:,-1]
+
+        y = self.fc(y)
+
+        return torch.sigmoid(y)
+
+
+model = TCNModel(X.shape[2]).to(device)
+
+criterion = nn.BCELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# -----------------------
+# Training
+# -----------------------
+
+EPOCHS = 25
 
 for epoch in range(EPOCHS):
+
     model.train()
-    permutation = torch.randperm(X_train.size(0))
-    
+
     total_loss = 0
-    
-    for i in range(0, X_train.size(0), BATCH_SIZE):
-        indices = permutation[i:i+BATCH_SIZE]
-        
-        batch_X = X_train[indices]
-        batch_y = y_train[indices]
-        
+
+    loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+
+    for X_batch, y_batch in loop:
+
+        X_batch = X_batch.to(device, non_blocking=True)
+        y_batch = y_batch.to(device, non_blocking=True)
+
         optimizer.zero_grad()
-        outputs = model(batch_X)
-        loss = criterion(outputs, batch_y)
+
+        preds = model(X_batch).squeeze()
+
+        loss = criterion(preds, y_batch)
+
         loss.backward()
+
         optimizer.step()
-        
+
         total_loss += loss.item()
-    
-    print(f"Epoch [{epoch+1}/{EPOCHS}] Loss: {total_loss:.4f}")
 
-# =========================
-# EVALUATION
-# =========================
-model.eval()
-with torch.no_grad():
-    logits = model(X_test)
-    probs = torch.sigmoid(logits)
-    preds = (probs > 0.5).float()
+        loop.set_postfix(loss=loss.item())
 
-print("\nClassification Report:\n")
-print(classification_report(y_test.cpu(), preds.cpu()))
+    print("Train Loss:", total_loss/len(train_loader))
 
-print("Confusion Matrix:\n")
-print(confusion_matrix(y_test.cpu(), preds.cpu()))
+    # -----------------------
+    # Validation
+    # -----------------------
 
-# =========================
-# SAVE MODEL + SCALER
-# =========================
-torch.save(model.state_dict(), "tcn_volatility_model.pth")
+    model.eval()
 
-import joblib
-joblib.dump(scaler, "tcn_scaler.pkl")
+    correct = 0
+    total = 0
 
-print("Model and scaler saved successfully.")
+    with torch.no_grad():
+
+        for X_batch, y_batch in test_loader:
+
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            preds = model(X_batch).squeeze()
+
+            preds = (preds > 0.5).float()
+
+            correct += (preds == y_batch).sum().item()
+            total += y_batch.size(0)
+
+    acc = correct/total
+
+    print("Validation Accuracy:", acc)
+
+# -----------------------
+# Save model
+# -----------------------
+
+torch.save(model.state_dict(),"tcn_risk_model.pth")
+
+print("Model saved successfully")
