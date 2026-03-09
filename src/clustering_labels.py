@@ -18,11 +18,14 @@ stocks = [
     "ITC"
 ]
 
-print("Preparing clustering features...")
+# initialize labels
+final_labels = np.zeros(len(df))
 
-cluster_features = []
+print("Running DBSCAN per stock...")
 
 for s in stocks:
+
+    print("Processing:", s)
 
     features = df[[
         f"{s}_volatility",
@@ -31,36 +34,31 @@ for s in stocks:
         "sector_vol"
     ]]
 
-    cluster_features.append(features)
+    X = features.values
 
-cluster_features = pd.concat(cluster_features, axis=1)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-# convert to numpy
-X = cluster_features.values
+    dbscan = DBSCAN(
+        eps=2.5,
+        min_samples=15
+    )
 
-print("Scaling features...")
+    clusters = dbscan.fit_predict(X_scaled)
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+    # DBSCAN outliers = -1
+    stock_labels = np.where(clusters == -1, 1, 0)
 
-print("Running DBSCAN...")
+    # combine anomalies across stocks
+    final_labels = np.maximum(final_labels, stock_labels)
 
-dbscan = DBSCAN(
-    eps=1.5,
-    min_samples=10
-)
+df["label"] = final_labels.astype(int)
 
-clusters = dbscan.fit_predict(X_scaled)
-
-print("Assigning labels...")
-
-# DBSCAN outliers = -1
-labels = np.where(clusters == -1, 1, 0)
-
-df["label"] = labels
+# remove fragmentation warning
+df = df.copy()
 
 df.to_csv("labeled_dataset.csv", index=False)
 
 print("Dataset saved as labeled_dataset.csv")
 print("Shape:", df.shape)
-print("Class distribution:", np.bincount(labels))
+print("Class distribution:", np.bincount(df["label"]))
