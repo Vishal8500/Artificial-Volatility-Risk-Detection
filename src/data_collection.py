@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+import time
 
 STOCKS = [
     "RELIANCE.NS",
@@ -18,37 +19,58 @@ SECTOR_INDEX = "^CNXIT"
 START = "2014-01-01"
 END = "2024-01-01"
 
-data = []
+data = pd.DataFrame()
 
 print("Downloading stock data...")
 
 for stock in STOCKS:
 
-    df = yf.download(stock, start=START, end=END)
+    df = yf.download(stock, start=START, end=END, progress=False)
 
-    df["stock"] = stock
+    if df.empty:
+        print("Skipped", stock)
+        continue
 
     df = df.reset_index()
 
-    data.append(df)
+    name = stock.replace(".NS","")
 
-stocks_df = pd.concat(data)
+    df = df[["Date","Open","High","Low","Close","Volume"]]
 
-market = yf.download(MARKET_INDEX, start=START, end=END)
-market = market.reset_index()
+    df.rename(columns={
+        "Open": f"{name}_Open",
+        "High": f"{name}_High",
+        "Low": f"{name}_Low",
+        "Close": f"{name}_Close",
+        "Volume": f"{name}_Volume"
+    }, inplace=True)
 
-sector = yf.download(SECTOR_INDEX, start=START, end=END)
-sector = sector.reset_index()
+    if data.empty:
+        data = df
+    else:
+        data = pd.merge(data, df, on="Date", how="outer")
 
-market["index_close"] = market["Close"]
-sector["sector_close"] = sector["Close"]
+    print("Downloaded", stock)
 
-market = market[["Date","index_close"]]
-sector = sector[["Date","sector_close"]]
+    time.sleep(1)
 
-stocks_df = stocks_df.merge(market,on="Date",how="left")
-stocks_df = stocks_df.merge(sector,on="Date",how="left")
 
-stocks_df.to_csv("raw_market_data.csv",index=False)
+print("Downloading market index...")
+market = yf.download(MARKET_INDEX, start=START, end=END, progress=False)
+market = market.reset_index()[["Date","Close"]]
+market.rename(columns={"Close":"index_close"}, inplace=True)
 
-print("Raw dataset saved")
+
+print("Downloading sector index...")
+sector = yf.download(SECTOR_INDEX, start=START, end=END, progress=False)
+sector = sector.reset_index()[["Date","Close"]]
+sector.rename(columns={"Close":"sector_close"}, inplace=True)
+
+
+data = pd.merge(data, market, on="Date", how="left")
+data = pd.merge(data, sector, on="Date", how="left")
+
+data.to_csv("raw_market_data.csv", index=False)
+
+print("Dataset saved")
+print("Shape:", data.shape)

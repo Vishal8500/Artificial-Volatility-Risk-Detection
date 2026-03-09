@@ -1,108 +1,92 @@
-import numpy as np
 import pandas as pd
-from scipy.stats import kurtosis, skew
-from sklearn.linear_model import LinearRegression
+import numpy as np
 
-# ===============================
-# LOAD DATA
-# ===============================
-df = pd.read_csv("synthetic_volatility_final_realistic.csv")
-num_feature_columns = df.shape[1] - 1
-WINDOW_SIZE = num_feature_columns // 4  # make sure this matches generator
+print("Loading raw data...")
 
-# Separate features and label
-labels = df["label"].values
-feature_df = df.drop(columns=["label"])
+df = pd.read_csv("raw_market_data.csv", low_memory=False)
 
-X_flat = feature_df.values
+df["Date"] = pd.to_datetime(df["Date"])
 
-# Reshape
-X = X_flat.reshape(X_flat.shape[0], WINDOW_SIZE, 4)
+# Convert all numeric columns
+for col in df.columns:
+    if col != "Date":
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-num_samples = X.shape[0]
+stocks = [
+    "RELIANCE",
+    "TCS",
+    "INFY",
+    "HDFCBANK",
+    "ICICIBANK",
+    "SBIN",
+    "LT",
+    "ITC"
+]
 
-# Feature indices
-STOCK_VOL = 0
-VOLUME = 1
-INDEX_VOL = 2
-SECTOR_VOL = 3
+print("Generating features...")
 
-# ===============================
-# ADVANCED FEATURE ENGINEERING
-# ===============================
+for s in stocks:
 
-vol_persistence = []
-vol_trend = []
-market_divergence = []
-sector_divergence = []
-vol_volume_elasticity = []
-vol_kurtosis = []
-vol_skewness = []
-max_drawdown = []
-regime_concentration = []
-lag_corr = []
+    close = f"{s}_Close"
+    high = f"{s}_High"
+    low = f"{s}_Low"
+    volume = f"{s}_Volume"
 
-for i in range(num_samples):
-    
-    stock_vol = X[i,:,STOCK_VOL]
-    volume = X[i,:,VOLUME]
-    index_vol = X[i,:,INDEX_VOL]
-    sector_vol = X[i,:,SECTOR_VOL]
-    
-    # 1 Volatility Persistence
-    persistence = np.corrcoef(stock_vol[:-1], stock_vol[1:])[0,1]
-    vol_persistence.append(persistence)
-    
-    # 2 Volatility Trend
-    time_idx = np.arange(WINDOW_SIZE).reshape(-1,1)
-    model = LinearRegression().fit(time_idx, stock_vol)
-    vol_trend.append(model.coef_[0])
-    
-    # 3 Market Divergence
-    market_divergence.append(np.mean(stock_vol - index_vol))
-    
-    # 4 Sector Divergence
-    sector_divergence.append(np.mean(stock_vol - sector_vol))
-    
-    # 5 Volume Elasticity
-    elasticity = np.corrcoef(stock_vol, volume)[0,1]
-    vol_volume_elasticity.append(elasticity)
-    
-    # 6 Kurtosis
-    vol_kurtosis.append(kurtosis(stock_vol))
-    
-    # 7 Skewness
-    vol_skewness.append(skew(stock_vol))
-    
-    # 8 Max Drawdown
-    peak_idx = np.argmax(stock_vol)
-    if peak_idx < WINDOW_SIZE - 1:
-        drawdown = stock_vol[peak_idx] - np.min(stock_vol[peak_idx:])
-    else:
-        drawdown = 0
-    max_drawdown.append(drawdown)
-    
-    # 9 Regime Concentration
-    regime_ratio = np.max(stock_vol) / (np.sum(stock_vol) + 1e-6)
-    regime_concentration.append(regime_ratio)
-    
-    # 10 Lag Correlation
-    lag_corr_value = np.corrcoef(stock_vol[1:], index_vol[:-1])[0,1]
-    lag_corr.append(lag_corr_value)
+    # Log return
+    df[f"{s}_return"] = np.log(df[close]).diff()
 
-# Add to dataframe
-df["vol_persistence"] = vol_persistence
-df["vol_trend"] = vol_trend
-df["market_divergence"] = market_divergence
-df["sector_divergence"] = sector_divergence
-df["vol_volume_elasticity"] = vol_volume_elasticity
-df["vol_kurtosis"] = vol_kurtosis
-df["vol_skewness"] = vol_skewness
-df["max_drawdown"] = max_drawdown
-df["regime_concentration"] = regime_concentration
-df["lag_corr"] = lag_corr
+    # Volatility
+    df[f"{s}_volatility"] = df[f"{s}_return"].rolling(10).std()
 
-df.to_csv("synthetic_volatility_hard_engg.csv", index=False)
+    # Normalized volume
+    df[f"{s}_volume_norm"] = df[volume] / df[volume].rolling(10).mean()
 
-print("Feature engineering complete.")
-print("New shape:", df.shape)
+    # Moving averages
+    df[f"{s}_MA5"] = df[close].rolling(5).mean()
+    df[f"{s}_MA20"] = df[close].rolling(20).mean()
+
+    # Momentum
+    df[f"{s}_momentum"] = df[close] - df[f"{s}_MA20"]
+
+    # Intraday volatility
+    df[f"{s}_range"] = (df[high] - df[low]) / df[close]
+
+    # RSI
+    delta = df[close].diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+
+    rs = avg_gain / avg_loss
+
+    df[f"{s}_RSI"] = 100 - (100 / (1 + rs))
+
+    # Z-score
+    rolling_mean = df[close].rolling(20).mean()
+    rolling_std = df[close].rolling(20).std()
+
+    df[f"{s}_zscore"] = (df[close] - rolling_mean) / rolling_std
+
+
+print("Generating market features...")
+
+df["index_return"] = np.log(df["index_close"]).diff()
+df["index_vol"] = df["index_return"].rolling(10).std()
+
+df["sector_return"] = np.log(df["sector_close"]).diff()
+df["sector_vol"] = df["sector_return"].rolling(10).std()
+
+print("Computing market correlation...")
+
+for s in stocks:
+    df[f"{s}_market_corr"] = df[f"{s}_return"].rolling(20).corr(df["index_return"])
+
+df = df.dropna()
+
+df.to_csv("engineered_features.csv", index=False)
+
+print("Feature engineering complete")
+print("Dataset shape:", df.shape)
