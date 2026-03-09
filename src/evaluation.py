@@ -15,7 +15,7 @@ print("Using device:", device)
 # =========================
 # LOAD DATA
 # =========================
-df = pd.read_csv("synthetic_volatility_final_realistic.csv")
+df = pd.read_csv(r"D:\RISK Proj\data\synthetic_volatility_final_realistic.csv")
 
 y = df["label"].values
 X_flat = df.drop(columns=["label"]).values
