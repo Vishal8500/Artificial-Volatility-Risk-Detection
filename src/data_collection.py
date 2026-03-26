@@ -3,21 +3,60 @@ import pandas as pd
 import time
 
 STOCKS = [
-    "RELIANCE.NS",
-    "TCS.NS",
-    "INFY.NS",
+    # Banking & Financials
     "HDFCBANK.NS",
     "ICICIBANK.NS",
+    "KOTAKBANK.NS",
+    "AXISBANK.NS",
     "SBIN.NS",
+    "BAJFINANCE.NS",
+    "BAJAJFINSV.NS",
+
+    # IT
+    "TCS.NS",
+    "INFY.NS",
+    "HCLTECH.NS",
+    "WIPRO.NS",
+    "TECHM.NS",
+
+    # Energy & Oil
+    "RELIANCE.NS",
+    "ONGC.NS",
+    "IOC.NS",
+    "BPCL.NS",
+
+    # Automobile
+    "MARUTI.NS",
+    "M&M.NS",
+    "TATAMOTORS.NS",
+    "HEROMOTOCO.NS",
+
+    # FMCG / Consumer
+    "HINDUNILVR.NS",
+    "ITC.NS",
+    "NESTLEIND.NS",
+    "BRITANNIA.NS",
+
+    # Infra / Cement
     "LT.NS",
-    "ITC.NS"
+    "ULTRACEMCO.NS",
+    "GRASIM.NS",
+
+    # Pharma
+    "SUNPHARMA.NS",
+    "CIPLA.NS",
+
+    # Telecom / Utilities
+    "BHARTIARTL.NS",
+    "NTPC.NS",
+    "POWERGRID.NS"
 ]
 
 MARKET_INDEX = "^NSEI"
 SECTOR_INDEX = "^CNXIT"
 
-START = "2014-01-01"
-END = "2024-01-01"
+START = "2019-01-01"
+END = "2024-12-01"
 
 data = pd.DataFrame()
 
