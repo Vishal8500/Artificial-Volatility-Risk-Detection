@@ -13,14 +13,52 @@ for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 stocks = [
-    "RELIANCE",
-    "TCS",
-    "INFY",
+    # Banking & Financials
     "HDFCBANK",
     "ICICIBANK",
+    "KOTAKBANK",
+    "AXISBANK",
     "SBIN",
+    "BAJFINANCE",
+    "BAJAJFINSV",
+
+    # IT
+    "TCS",
+    "INFY",
+    "HCLTECH",
+    "WIPRO",
+    "TECHM",
+
+    # Energy & Oil
+    "RELIANCE",
+    "ONGC",
+    "IOC",
+    "BPCL",
+
+    # Automobile
+    "MARUTI",
+    "M&M",
+    "HEROMOTOCO",
+
+    # FMCG / Consumer
+    "HINDUNILVR",
+    "ITC",
+    "NESTLEIND",
+    "BRITANNIA",
+
+    # Infra / Cement
     "LT",
-    "ITC"
+    "ULTRACEMCO",
+    "GRASIM",
+
+    # Pharma
+    "SUNPHARMA",
+    "CIPLA",
+
+    # Telecom / Utilities
+    "BHARTIARTL",
+    "NTPC",
+    "POWERGRID"
 ]
 
 print("Generating features...")

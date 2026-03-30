@@ -28,7 +28,6 @@ STOCKS = [
     # Automobile
     "MARUTI.NS",
     "M&M.NS",
-    "TATAMOTORS.NS",
     "HEROMOTOCO.NS",
 
     # FMCG / Consumer
