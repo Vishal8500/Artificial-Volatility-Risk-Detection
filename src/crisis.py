@@ -219,3 +219,127 @@ summary_df = pd.DataFrame(results)
 summary_df.to_csv(f"{base_dir}/summary.csv", index=False)
 
 print("\n✅ DONE → outputs/demonetization_analysis/")
+
+# ============================
+# FINAL TABLE 6: DEMONETIZATION ANALYSIS
+# ============================
+
+def safe_mean(arr):
+    arr = pd.to_numeric(arr, errors='coerce')
+    arr = arr[np.isfinite(arr)]
+    return np.mean(arr) if len(arr) > 0 else np.nan
+
+def cohens_d(a, b):
+    a = pd.to_numeric(a, errors='coerce')
+    b = pd.to_numeric(b, errors='coerce')
+
+    a = a[np.isfinite(a)]
+    b = b[np.isfinite(b)]
+
+    if len(a) < 2 or len(b) < 2:
+        return np.nan
+
+    pooled = np.sqrt((np.var(a) + np.var(b)) / 2)
+    if pooled == 0:
+        return 0
+
+    return (np.mean(a) - np.mean(b)) / pooled
+
+
+# ============================
+# AGGREGATE ACROSS ALL STOCKS
+# ============================
+
+before_returns = []
+after_returns = []
+before_artificial = []
+after_artificial = []
+
+for file in os.listdir(f"{base_dir}/csv"):
+    df = pd.read_csv(f"{base_dir}/csv/{file}")
+
+    before_returns.extend(df["before_artificial"].dropna())
+    before_returns.extend(df["before_natural"].dropna())
+
+    after_returns.extend(df["after_artificial"].dropna())
+    after_returns.extend(df["after_natural"].dropna())
+
+    before_artificial.extend(df["before_artificial"].dropna())
+    after_artificial.extend(df["after_artificial"].dropna())
+
+
+# ============================
+# COMPUTE METRICS
+# ============================
+
+avg_before = safe_mean(before_returns)
+avg_after = safe_mean(after_returns)
+
+art_before = safe_mean(before_artificial)
+art_after = safe_mean(after_artificial)
+
+effect = cohens_d(before_returns, after_returns)
+
+change_avg = avg_after - avg_before
+change_art = art_after - art_before
+
+# ============================
+# CREATE TABLE
+# ============================
+
+table6 = pd.DataFrame({
+    "Metric": ["Avg Return", "Artificial Return", "Effect Size"],
+    "Before": [avg_before, art_before, effect],
+    "After": [avg_after, art_after, effect],
+    "Change": [change_avg, change_art, effect]
+})
+
+# Convert to %
+table6["Before"] = (table6["Before"] * 100).round(2)
+table6["After"] = (table6["After"] * 100).round(2)
+table6["Change"] = (table6["Change"] * 100).round(2)
+
+# ============================
+# PRINT TABLE
+# ============================
+
+print("\n📊 Table 6: Pre vs Post Demonetization\n")
+print(table6.to_string(index=False))
+
+# ============================
+# SAVE CSV
+# ============================
+
+table6.to_csv(f"{base_dir}/demonetization_table.csv", index=False)
+print("\n✅ Table saved → demonetization_table.csv")
+
+
+# ============================
+# PLOT 3 (COLORFUL BAR CHART)
+# ============================
+
+import numpy as np
+
+labels = ["Avg Return", "Artificial Return"]
+before_vals = [avg_before*100, art_before*100]
+after_vals = [avg_after*100, art_after*100]
+
+x = np.arange(len(labels))
+
+plt.figure()
+
+plt.bar(x - 0.2, before_vals, width=0.4, label="Before", color="#ff6b6b")
+plt.bar(x + 0.2, after_vals, width=0.4, label="After", color="#4dabf7")
+
+plt.xticks(x, labels)
+plt.ylabel("Return (%)")
+plt.title("Before vs After Demonetization")
+
+plt.legend()
+plt.grid(axis='y', linestyle='--', alpha=0.6)
+
+plot_path = f"{base_dir}/demonetization_comparison.png"
+plt.savefig(plot_path, dpi=200)
+plt.close()
+
+print(f"📈 Plot saved → {plot_path}")

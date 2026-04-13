@@ -5,7 +5,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.model_selection import train_test_split
 from pytorch_tcn import TCN
-
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay, roc_curve
 # ------------------------
 # Device
 # ------------------------
@@ -126,3 +127,33 @@ print("\nConfusion Matrix\n")
 print(confusion_matrix(all_labels, all_preds))
 
 print("\nROC-AUC Score:", roc_auc_score(all_labels, all_probs))
+cm = confusion_matrix(all_labels, all_preds)
+
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+
+plt.figure()
+disp.plot()
+plt.title("Confusion Matrix")
+plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
+plt.close()
+
+print("Confusion matrix saved as confusion_matrix.png")
+
+# ------------------------
+# Save ROC Curve
+# ------------------------
+
+fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
+auc_score = roc_auc_score(all_labels, all_probs)
+
+plt.figure()
+plt.plot(fpr, tpr, label=f"AUC = {auc_score:.4f}")
+plt.plot([0, 1], [0, 1], linestyle="--")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+plt.legend()
+plt.savefig("roc_curve.png", dpi=300, bbox_inches='tight')
+plt.close()
+
+print("ROC curve saved as roc_curve.png")
